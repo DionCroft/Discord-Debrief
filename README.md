@@ -110,3 +110,34 @@ Source-level failures are logged to `logs/london_daily_debrief.log`, so cron run
 ```
 
 This runs every 4 hours and appends output to `logs/london_daily_debrief.log`.
+
+## Systemd Boot Timer
+
+The Pi can run the debrief automatically after reboot and then every 4 hours with the bundled user timer:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/daily-debrief.service ~/.config/systemd/user/
+cp systemd/daily-debrief.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now daily-debrief.timer
+```
+
+Check the timer:
+
+```bash
+systemctl --user list-timers daily-debrief.timer
+systemctl --user status daily-debrief.timer
+```
+
+Run a debrief immediately:
+
+```bash
+systemctl --user start daily-debrief.service
+```
+
+Read logs:
+
+```bash
+tail -f logs/london_daily_debrief.log
+```

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run London Daily Debrief
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/cadmus/Projects/Debrief/daily-debrief
+ExecStart=/home/cadmus/Projects/Debrief/daily-debrief/run_discord_debrief.sh
+TimeoutStartSec=10min

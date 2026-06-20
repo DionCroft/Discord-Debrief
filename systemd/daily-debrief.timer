@@ -1,0 +1,11 @@
+[Unit]
+Description=Run London Daily Debrief After Boot And Every 4 Hours
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=4h
+Persistent=true
+Unit=daily-debrief.service
+
+[Install]
+WantedBy=timers.target
