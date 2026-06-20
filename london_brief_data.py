@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 import feedparser
 import requests
 
-from config import Config, load_config
+from config import DEFAULT_PIXEL_ASSET_DIR, Config, load_config
 from discord_notifier import send_discord_report
 
 
@@ -53,6 +53,7 @@ DISCORD_FIELD_LIMIT = 1000
 HISTORY_MAX_RUNS = 30
 
 logger = logging.getLogger(__name__)
+SEASONAL_ASSET_DIR = DEFAULT_PIXEL_ASSET_DIR / "seasonal"
 
 WEATHER_CODES = {
     0: "Clear sky",
@@ -945,7 +946,7 @@ def build_discord_embeds(data: Dict[str, Any], config: Optional[Config] = None) 
             "color": color,
             "footer": {"text": now},
             },
-            image_url=config.pixel_banner_url if config else None,
+            image_url=seasonal_pixel_url("banner", config.pixel_banner_url) if config else None,
         )
     ]
 
@@ -995,7 +996,7 @@ def build_discord_embeds(data: Dict[str, Any], config: Optional[Config] = None) 
             "description": "\n".join(f"• {line}" for line in trend_summary),
             "color": 0x95A5A6,
             },
-            thumbnail_url=config.pixel_banner_url if config else None,
+            thumbnail_url=seasonal_pixel_url("banner", config.pixel_banner_url) if config else None,
         )
     )
 
@@ -1006,7 +1007,7 @@ def build_discord_embeds(data: Dict[str, Any], config: Optional[Config] = None) 
             "description": build_discord_news(news, limit=5),
             "color": 0x3498DB,
             },
-            thumbnail_url=config.news_thumbnail_url if config else None,
+            thumbnail_url=seasonal_pixel_url("news", config.news_thumbnail_url) if config else None,
         )
     )
 
@@ -1242,9 +1243,61 @@ def with_optional_image(
     return embed
 
 
+def season_for_month(month: int) -> str:
+    if month in {3, 4, 5}:
+        return "spring"
+    if month in {6, 7, 8}:
+        return "summer"
+    if month in {9, 10, 11}:
+        return "autumn"
+    return "winter"
+
+
+def day_part_for_hour(hour: int) -> str:
+    return "day" if 6 <= hour < 18 else "night"
+
+
+def seasonal_variant(category: str, value: datetime) -> int:
+    seed = value.toordinal() + sum(ord(char) for char in category)
+    return 1 + (seed % 2)
+
+
+def is_default_pixel_asset(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    if value.startswith(("http://", "https://", "attachment://")):
+        return False
+    try:
+        Path(value).resolve().relative_to(DEFAULT_PIXEL_ASSET_DIR)
+    except ValueError:
+        return False
+    return True
+
+
+def seasonal_pixel_url(
+    category: str,
+    fallback_url: Optional[str],
+    value: Optional[datetime] = None,
+) -> Optional[str]:
+    if fallback_url and not is_default_pixel_asset(fallback_url):
+        return fallback_url
+
+    value = value or datetime.now()
+    season = season_for_month(value.month)
+    day_part = day_part_for_hour(value.hour)
+    variant = seasonal_variant(category, value)
+    path = SEASONAL_ASSET_DIR / f"{category}-{season}-{day_part}-{variant}.gif"
+    if path.exists():
+        return str(path)
+    return fallback_url
+
+
 def weather_thumbnail_url(weather: Optional[Dict[str, Any]], config: Optional[Config]) -> Optional[str]:
     if not config:
         return None
+    seasonal = seasonal_pixel_url("weather", config.weather_thumbnail_url)
+    if seasonal:
+        return seasonal
     if not weather:
         return config.weather_thumbnail_url
 
@@ -1263,6 +1316,10 @@ def weather_thumbnail_url(weather: Optional[Dict[str, Any]], config: Optional[Co
 def travel_thumbnail_url(tfl: Optional[Dict[str, Any]], config: Optional[Config]) -> Optional[str]:
     if not config:
         return None
+    fallback = config.travel_delay_thumbnail_url if tfl and tfl.get("issues") else config.travel_good_thumbnail_url
+    seasonal = seasonal_pixel_url("travel", fallback or config.travel_thumbnail_url)
+    if seasonal:
+        return seasonal
     if tfl and not tfl["issues"]:
         return config.travel_good_thumbnail_url or config.travel_thumbnail_url
     if tfl and tfl["issues"]:
@@ -1273,6 +1330,9 @@ def travel_thumbnail_url(tfl: Optional[Dict[str, Any]], config: Optional[Config]
 def environment_thumbnail_url(air_quality: Optional[Dict[str, Any]], config: Optional[Config]) -> Optional[str]:
     if not config:
         return None
+    seasonal = seasonal_pixel_url("environment", config.environment_thumbnail_url)
+    if seasonal:
+        return seasonal
     if not air_quality:
         return config.environment_thumbnail_url
 

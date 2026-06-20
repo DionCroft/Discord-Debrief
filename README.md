@@ -5,7 +5,8 @@ Builds a London daily brief with weather, TfL status, alerts, air quality, polle
 ## Install
 
 ```bash
-cd daily-debrief
+git clone https://github.com/DionCroft/Discord-Debrief.git
+cd Discord-Debrief
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -43,9 +44,24 @@ Then run:
 python london_brief_data.py --send-discord
 ```
 
-`--send-discord` forces Discord delivery for that run if credentials are configured. Discord receives a styled embed briefing with overview, weather, travel, air quality, pollen, and news sections. You can also set `ENABLE_DISCORD=true` for scheduled use, and pass `--no-discord` to skip sending for a single run. Bot tokens should only live in `.env` or another secret store.
+`--send-discord` forces Discord delivery for that run if credentials are configured. Discord receives a styled embed briefing with overview, weather, travel, air quality, pollen, alerts, trends, and news sections. You can also set `ENABLE_DISCORD=true` for scheduled use, and pass `--no-discord` to skip sending for a single run. Bot tokens should only live in `.env` or another secret store.
 
 Bundled pixel-art GIFs live in `assets/pixel-gifs/` and are used by default. Discord uploads them with the message as local attachments, so the briefing does not depend on hotlinked image URLs.
+
+The default pack includes 80 cozy seasonal pixel GIFs in `assets/pixel-gifs/seasonal/`:
+
+- categories: banner, weather, travel, environment, news
+- seasons: spring, summer, autumn, winter
+- time of day: day, night
+- variants: 1 and 2
+
+Files follow this pattern:
+
+```text
+{category}-{season}-{day|night}-{1|2}.gif
+```
+
+For example, `weather-summer-day-1.gif` or `news-winter-night-2.gif`.
 
 You can override any built-in GIF with a public URL or another local file path inside this project:
 
@@ -70,7 +86,7 @@ TRAVEL_DELAY_THUMBNAIL_URL=
 NEWS_THUMBNAIL_URL=
 ```
 
-The script chooses state-specific images when configured, for example rain/storm/fog weather animations, good/delayed travel animations, and low/high pollen animations.
+The script chooses seasonal category GIFs automatically from the current month and hour. The older state-specific GIFs remain as fallback assets.
 
 Regenerate the bundled GIF pack after editing the generator:
 
@@ -109,7 +125,7 @@ Source-level failures are logged to `logs/london_daily_debrief.log`, so cron run
 0 */4 * * * /home/cadmus/Projects/Debrief/daily-debrief/run_discord_debrief.sh
 ```
 
-This runs every 4 hours and appends output to `logs/london_daily_debrief.log`.
+This runs every 4 hours and appends output to `logs/london_daily_debrief.log`. Update the path if you cloned the repo somewhere else.
 
 ## Systemd Boot Timer
 
