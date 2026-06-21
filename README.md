@@ -115,9 +115,25 @@ Each successful run stores a tiny history snapshot in `data/brief_history.json` 
 ```env
 HISTORY_PATH=
 LOG_PATH=
+HEALTH_PATH=
 ```
 
 Source-level failures are logged to `logs/london_daily_debrief.log`, so cron runs show which source failed instead of only showing "Unavailable".
+
+## Self-Healing
+
+Each run writes `data/last_run_status.json` by default. This records whether the run succeeded, source availability, Discord delivery mode, and any self-repair actions.
+
+The scheduler path can self-heal common local and Discord issues:
+
+- creates missing `logs/` and `data/` directories
+- regenerates bundled pixel GIFs if the asset pack is missing or incomplete
+- retries Discord delivery for rate limits and transient server/network errors
+- falls back from rich GIF embeds to image-free embeds
+- falls back from embeds to text-only delivery
+- sends a small Discord failure alert if the rich briefing cannot be delivered
+
+Override the health snapshot path with `HEALTH_PATH`.
 
 ## Cron Example
 

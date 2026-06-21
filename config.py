@@ -11,6 +11,7 @@ from typing import Sequence
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_HISTORY_PATH = PROJECT_ROOT / "data" / "brief_history.json"
 DEFAULT_LOG_PATH = PROJECT_ROOT / "logs" / "london_daily_debrief.log"
+DEFAULT_HEALTH_PATH = PROJECT_ROOT / "data" / "last_run_status.json"
 DEFAULT_PIXEL_ASSET_DIR = PROJECT_ROOT / "assets" / "pixel-gifs"
 
 
@@ -56,6 +57,7 @@ class Config:
     enable_discord: bool = False
     history_path: Path = DEFAULT_HISTORY_PATH
     log_path: Path = DEFAULT_LOG_PATH
+    health_path: Path = DEFAULT_HEALTH_PATH
     alert_feed_urls: list[str] | None = None
     discord_webhook_url: str | None = None
     discord_bot_token: str | None = None
@@ -89,6 +91,7 @@ def load_config() -> Config:
         enable_discord=_env_bool("ENABLE_DISCORD", False),
         history_path=Path(os.getenv("HISTORY_PATH") or str(DEFAULT_HISTORY_PATH)),
         log_path=Path(os.getenv("LOG_PATH") or str(DEFAULT_LOG_PATH)),
+        health_path=Path(os.getenv("HEALTH_PATH") or str(DEFAULT_HEALTH_PATH)),
         alert_feed_urls=_env_list("ALERT_FEED_URLS"),
         discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL") or None,
         discord_bot_token=os.getenv("DISCORD_BOT_TOKEN") or None,

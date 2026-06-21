@@ -21,6 +21,7 @@ import html
 import json
 import logging
 import re
+import traceback
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -32,7 +33,11 @@ import feedparser
 import requests
 
 from config import DEFAULT_PIXEL_ASSET_DIR, Config, load_config
-from discord_notifier import send_discord_report
+from discord_notifier import (
+    embeds_without_images,
+    send_discord_report,
+    send_discord_report_detailed,
+)
 
 
 # =========================
@@ -51,6 +56,7 @@ REQUEST_TIMEOUT = 20
 DISCORD_DESCRIPTION_LIMIT = 3900
 DISCORD_FIELD_LIMIT = 1000
 HISTORY_MAX_RUNS = 30
+EXPECTED_SEASONAL_GIF_COUNT = 80
 
 logger = logging.getLogger(__name__)
 SEASONAL_ASSET_DIR = DEFAULT_PIXEL_ASSET_DIR / "seasonal"
@@ -1369,6 +1375,112 @@ def truncate(text: str, max_len: int) -> str:
     return text[: max_len - 3].rstrip() + "..."
 
 
+def send_failure_alert(config: Config, title: str, detail: str) -> bool:
+    if not config.enable_discord:
+        return False
+
+    message = (
+        f"⚠️ **London Daily Debrief failed**\n"
+        f"**{title}**\n"
+        f"```text\n{truncate(detail, 1500)}\n```"
+    )
+    try:
+        sent = send_discord_report(message, config=config, embeds=None)
+        if sent:
+            logger.info("Discord failure alert sent.")
+        else:
+            logger.error("Discord failure alert could not be sent.")
+        return sent
+    except Exception:
+        logger.exception("Discord failure alert raised an unexpected error.")
+        return False
+
+
+def write_health_status(config: Config, status: Dict[str, Any]) -> None:
+    try:
+        config.health_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **status,
+        }
+        config.health_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Could not write health status file: %s", config.health_path)
+
+
+def repair_local_runtime(config: Config) -> List[str]:
+    repairs: List[str] = []
+    for path in {config.history_path.parent, config.log_path.parent, config.health_path.parent}:
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+            repairs.append(f"Created missing directory: {path}")
+
+    default_gifs = list(DEFAULT_PIXEL_ASSET_DIR.glob("*.gif"))
+    seasonal_gifs = list(SEASONAL_ASSET_DIR.glob("*.gif"))
+    if len(default_gifs) < 15 or len(seasonal_gifs) < EXPECTED_SEASONAL_GIF_COUNT:
+        try:
+            from scripts.generate_pixel_gifs import main as generate_pixel_gifs
+
+            generate_pixel_gifs()
+            repairs.append("Regenerated bundled pixel GIF assets.")
+        except Exception:
+            logger.exception("Could not regenerate bundled pixel GIF assets.")
+            repairs.append("Could not regenerate bundled pixel GIF assets; check Pillow is installed.")
+
+    return repairs
+
+
+def deliver_discord_with_self_heal(
+    config: Config,
+    data: Dict[str, Any],
+    brief: str,
+) -> Dict[str, Any]:
+    embeds = build_discord_embeds(data, config=config)
+    attempts: List[Dict[str, Any]] = []
+
+    rich = send_discord_report_detailed(
+        "London Morning Brief",
+        config=config,
+        embeds=embeds,
+    )
+    attempts.append({"mode": "rich", "result": rich.summary()})
+    if rich.success:
+        return {"success": True, "mode": "rich", "attempts": attempts}
+
+    no_images = send_discord_report_detailed(
+        "London Morning Brief",
+        config=config,
+        embeds=embeds_without_images(embeds),
+    )
+    attempts.append({"mode": "embeds_without_images", "result": no_images.summary()})
+    if no_images.success:
+        send_failure_alert(
+            config,
+            "Self-healed Discord delivery",
+            f"Rich embed delivery failed, but the briefing was sent without GIF attachments.\n{rich.summary()}",
+        )
+        return {"success": True, "mode": "embeds_without_images", "attempts": attempts}
+
+    text = send_discord_report_detailed(
+        truncate(brief, 5500),
+        config=config,
+        embeds=None,
+    )
+    attempts.append({"mode": "text_only", "result": text.summary()})
+    if text.success:
+        send_failure_alert(
+            config,
+            "Self-healed Discord delivery",
+            "Rich embed delivery and image-free embed delivery failed, but the briefing was sent as text.\n"
+            f"Rich: {rich.summary()}\nNo images: {no_images.summary()}",
+        )
+        return {"success": True, "mode": "text_only", "attempts": attempts}
+
+    detail = "\n".join(f"{attempt['mode']}: {attempt['result']}" for attempt in attempts)
+    send_failure_alert(config, "Discord delivery failed after self-heal attempts", detail)
+    return {"success": False, "mode": "failed", "attempts": attempts}
+
+
 # =========================
 # MAIN
 # =========================
@@ -1402,27 +1514,70 @@ def main() -> None:
     setup_logging(config)
     logger.info("London debrief run started.")
 
-    data = collect_brief_data(config, compact=compact)
-    brief = build_brief_from_data(data)
-    print(brief)
-
     if args.send_discord:
         config = replace(config, enable_discord=True)
     if args.no_discord:
         config = replace(config, enable_discord=False)
 
-    if config.enable_discord:
-        logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-        sent = send_discord_report(
-            "London Morning Brief",
-            config=config,
-            embeds=build_discord_embeds(data, config=config),
-        )
-        if not sent:
-            raise SystemExit(1)
+    try:
+        repairs = repair_local_runtime(config)
+        if repairs:
+            logger.info("Self-repair actions completed: %s", repairs)
 
-    update_history(config.history_path, data)
-    logger.info("London debrief run finished.")
+        data = collect_brief_data(config, compact=compact)
+        brief = build_brief_from_data(data)
+        print(brief)
+
+        delivery_status: Dict[str, Any] = {"enabled": config.enable_discord}
+        if config.enable_discord:
+            logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+            delivery_status = deliver_discord_with_self_heal(config, data, brief)
+            if not delivery_status["success"]:
+                logger.error("London debrief Discord delivery failed after self-heal attempts.")
+                write_health_status(
+                    config,
+                    {
+                        "status": "failed",
+                        "stage": "discord_delivery",
+                        "repairs": repairs,
+                        "discord": delivery_status,
+                    },
+                )
+                raise SystemExit(1)
+
+        update_history(config.history_path, data)
+        write_health_status(
+            config,
+            {
+                "status": "ok",
+                "repairs": repairs,
+                "discord": delivery_status,
+                "sources": {
+                    "weather": data["weather"] is not None,
+                    "tfl": data["tfl"] is not None,
+                    "air_quality": data["air_quality"] is not None,
+                    "news": bool(data["news"]),
+                    "alerts": len(data["alerts"]),
+                },
+            },
+        )
+        logger.info("London debrief run finished.")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        logger.exception("London debrief run failed.")
+        write_health_status(
+            config,
+            {
+                "status": "failed",
+                "stage": "run",
+                "error": str(exc),
+                "traceback": detail,
+            },
+        )
+        send_failure_alert(config, "Scheduled run failed", detail)
+        raise
 
 
 if __name__ == "__main__":
