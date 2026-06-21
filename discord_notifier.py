@@ -26,6 +26,7 @@ DISCORD_EMBED_FIELD_LIMIT = 25
 DISCORD_EMBED_FIELD_VALUE_LIMIT = 1024
 DISCORD_EMBED_TITLE_LIMIT = 256
 DISCORD_TOTAL_EMBED_TEXT_LIMIT = 6000
+DISCORD_SAFE_TOTAL_EMBED_TEXT_LIMIT = 5800
 DISCORD_UPLOAD_LIMIT_BYTES = 8 * 1024 * 1024
 DISCORD_DELIVERY_ATTEMPTS = 3
 
@@ -151,16 +152,53 @@ def _send_via_bot(
 def _payloads(body: str, embeds: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     if embeds:
         payloads = []
-        for start in range(0, len(embeds), DISCORD_EMBEDS_PER_MESSAGE):
+        current: list[dict[str, Any]] = []
+        current_text_length = 0
+
+        for embed in embeds:
+            embed_length = _embed_text_length(embed)
+            if (
+                current
+                and (
+                    len(current) >= DISCORD_EMBEDS_PER_MESSAGE
+                    or current_text_length + embed_length > DISCORD_SAFE_TOTAL_EMBED_TEXT_LIMIT
+                )
+            ):
+                payloads.append(
+                    {
+                        "content": body if not payloads else "",
+                        "embeds": current,
+                    }
+                )
+                current = []
+                current_text_length = 0
+
+            current.append(embed)
+            current_text_length += embed_length
+
+        if current:
             payloads.append(
                 {
-                    "content": body if start == 0 else "",
-                    "embeds": embeds[start : start + DISCORD_EMBEDS_PER_MESSAGE],
+                    "content": body if not payloads else "",
+                    "embeds": current,
                 }
             )
         return payloads
 
     return [_message_payload(chunk) for chunk in _message_chunks(body)]
+
+
+def _embed_text_length(embed: dict[str, Any]) -> int:
+    total = len(embed.get("title", "")) + len(embed.get("description", ""))
+    for field in embed.get("fields", []):
+        total += len(field.get("name", "")) + len(field.get("value", ""))
+    footer = embed.get("footer", {})
+    if isinstance(footer, dict):
+        total += len(footer.get("text", ""))
+    author = embed.get("author", {})
+    if isinstance(author, dict):
+        total += len(author.get("name", ""))
+    return total
 
 
 def _post_discord_payload(
