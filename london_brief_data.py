@@ -767,9 +767,26 @@ def add_section(lines: List[str], title: str) -> None:
     lines.append("━━━━━━━━━━")
 
 
+def brief_title_for_hour(hour: int) -> str:
+    if 5 <= hour < 9:
+        return "London Early Morning Brief"
+    if 9 <= hour < 12:
+        return "London Morning Brief"
+    if 12 <= hour < 14:
+        return "London Midday Brief"
+    if 14 <= hour < 17:
+        return "London Afternoon Brief"
+    if 17 <= hour < 21:
+        return "London Evening Brief"
+    if 21 <= hour < 24:
+        return "London Night Brief"
+    return "London Late Night Brief"
+
+
 def collect_brief_data(config: Config, compact: bool = False) -> Dict[str, Any]:
-    now = datetime.now().strftime("%A, %d %B %Y")
-    current_time = datetime.now().strftime("%H:%M")
+    run_time = datetime.now()
+    now = run_time.strftime("%A, %d %B %Y")
+    current_time = run_time.strftime("%H:%M")
     history = load_history(config.history_path)
     previous = previous_snapshot(history)
 
@@ -796,6 +813,7 @@ def collect_brief_data(config: Config, compact: bool = False) -> Dict[str, Any]:
     return {
         "now": now,
         "current_time": current_time,
+        "brief_title": brief_title_for_hour(run_time.hour),
         "weather": weather,
         "tfl": tfl,
         "air_quality": air_quality,
@@ -811,6 +829,7 @@ def collect_brief_data(config: Config, compact: bool = False) -> Dict[str, Any]:
 
 def build_brief_from_data(data: Dict[str, Any]) -> str:
     now = data["now"]
+    brief_title = data.get("brief_title", "London Daily Brief")
     current_time = data["current_time"]
     weather = data["weather"]
     tfl = data["tfl"]
@@ -821,7 +840,7 @@ def build_brief_from_data(data: Dict[str, Any]) -> str:
     compact = data["compact"]
 
     lines: List[str] = []
-    lines.append(f"🌅 *London Morning Brief* — {now}")
+    lines.append(f"🌅 *{brief_title}* — {now}")
     lines.append("")
 
     # Weather
@@ -941,13 +960,14 @@ def build_discord_embeds(data: Dict[str, Any], config: Optional[Config] = None) 
     trend_summary = data["trend_summary"]
     compact = data["compact"]
     now = data["now"]
+    brief_title = data.get("brief_title", "London Daily Brief")
     current_time = data["current_time"]
 
     color = discord_status_color(weather, tfl)
     embeds: List[Dict[str, Any]] = [
         with_optional_image(
             {
-            "title": "▣ LONDON DAILY BRIEF ▣",
+            "title": f"▣ {brief_title.upper()} ▣",
             "description": pixel_panel(build_discord_overview(data)),
             "color": color,
             "footer": {"text": now},
@@ -1439,7 +1459,7 @@ def deliver_discord_with_self_heal(
     attempts: List[Dict[str, Any]] = []
 
     rich = send_discord_report_detailed(
-        "London Morning Brief",
+        data.get("brief_title", "London Daily Brief"),
         config=config,
         embeds=embeds,
     )
@@ -1448,7 +1468,7 @@ def deliver_discord_with_self_heal(
         return {"success": True, "mode": "rich", "attempts": attempts}
 
     no_images = send_discord_report_detailed(
-        "London Morning Brief",
+        data.get("brief_title", "London Daily Brief"),
         config=config,
         embeds=embeds_without_images(embeds),
     )
